@@ -34,6 +34,8 @@ def svm_loss_naive(W, X, y, reg):
       margin = scores[j] - correct_class_score + 1 # note delta = 1
       if margin > 0:
         loss += margin
+        dW[:,j] += X[i]
+        dW[:,y[i]] -= X[i]
 
   # Right now the loss is a sum over all training examples, but we want it
   # to be an average instead so we divide by num_train.
@@ -50,7 +52,8 @@ def svm_loss_naive(W, X, y, reg):
   # loss is being computed. As a result you may need to modify some of the    #
   # code above to compute the gradient.                                       #
   #############################################################################
-
+  dW /= num_train
+  dW += reg * 2 * W
 
   return loss, dW
 
@@ -69,7 +72,17 @@ def svm_loss_vectorized(W, X, y, reg):
   # Implement a vectorized version of the structured SVM loss, storing the    #
   # result in loss.                                                           #
   #############################################################################
-  pass
+  num_train = X.shape[0]
+
+  scores = X.dot(W)
+  correct_class_score = scores[np.arange(num_train), y]
+  scores -= np.reshape(correct_class_score, (-1, 1)) # Sj - Syi
+  scores = np.clip(scores + 1, 0, None)              # Sj - Syi + 1
+  scores[np.arange(num_train), y] = 0                # remove cases "j = y[i]"
+
+  loss = np.sum(scores)
+  loss /= num_train
+  loss += reg * np.sum(W * W)
   #############################################################################
   #                             END OF YOUR CODE                              #
   #############################################################################
@@ -84,7 +97,57 @@ def svm_loss_vectorized(W, X, y, reg):
   # to reuse some of the intermediate values that you used to compute the     #
   # loss.                                                                     #
   #############################################################################
-  pass
+  num_classes = W.shape[1]
+  scores_boolean = np.clip(np.ceil(scores), 0, 1)    # above 0 becomes 1(True)
+
+  ## First trial (one double loop)
+  #for j in range(num_classes):
+  #  for i in range(num_train):
+  #    if scores_boolean[i, j] == 1:
+  #      dW[:,j] += X[i]
+  #      dW[:,y[i]] -= X[i]
+
+  ## Second trial (two single loops)
+  #for j in range(num_classes):
+  #  dW[:,j] += np.sum(X * np.reshape(scores_boolean[:,j], (-1,1)), axis=0)
+  #augmented_X = X * np.reshape(np.sum(scores_boolean, axis=1), (-1,1))
+  #for i in range(num_train):
+  #  dW[:,y[i]] -= augmented_X[i]
+
+  # Last trial (no loop)
+
+  #dW += np.dot(np.tile(X.T, num_classes) * np.tile(np.reshape(scores_boolean, -1, order='F'), (D,1)),
+  #             np.reshape(np.tile(np.eye(num_classes), num_train), (num_classes * num_train, num_classes)))
+  #dW += np.dot(np.tile(X.T, num_classes) * np.reshape(scores_boolean, -1, order='F'),
+  #             np.reshape(np.tile(np.eye(num_classes), num_train), (num_classes * num_train, num_classes)))
+  dW += np.dot(X.T, scores_boolean)
+
+  #score           y
+  #1 0 1           1              dW[:1] -2 * X[0]
+  #0 1 1           1              dW[:1] -2 * X[1]
+  #1 0 1           2              dW[:2] -2 * X[2]
+  #0 0 1           0              dW[:0] -1 * X[3]
+  #
+  #X                     scores sum axis=1
+  #1 2 3 4 5             2
+  #1 2 3 4 5             2
+  #1 2 3 4 5             2
+  #1 2 3 4 5             1
+  #
+  #W
+  #0 0 0
+  #0 0 0
+  #0 0 0
+  #0 0 0
+  #0 0 0
+
+  shfl_mat = np.zeros(scores_boolean.shape)
+  shfl_mat[np.arange(num_train), y] = 1
+  dW -= np.dot((X * np.reshape(np.sum(scores_boolean, axis=1), (-1,1))).T, shfl_mat)
+
+  # Rest
+  dW /= num_train
+  dW += reg * 2 * W
   #############################################################################
   #                             END OF YOUR CODE                              #
   #############################################################################
